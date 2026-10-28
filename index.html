@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+ <link rel="apple-touch-icon" sizes="180x180" href="icon.png">
+ <link rel="icon" type="image/png" sizes="192x192" href="icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Notes">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<title>Notes</title>
+<style>
+:root{
+  --bg:#000; --card:#1c1c1e; --sep:#38383a; --text:#fff; --body-text:#e5e5e7;
+  --muted:#98989f; --btn:#1d1d1f; --btn-edge:rgba(255,255,255,.09); --danger:#ff453a;
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue",Arial,"Noto Sans Bengali",sans-serif;
+  --side:16px; --card-radius:22px; --btn-size:44px;
+  --home-title:34px; --section:22px; --row-title:18px; --row-sub:16px;
+  --note-title:28px; --note-body:20px; --note-lh:26px;
+  --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
+  /* Distance from the bottom edge of the app to the bottom of the floating controls.
+     The safe-area inset is applied exactly once, and only partly: the glass controls
+     sit lower, overlapping the empty home-indicator zone but staying clear of the
+     indicator bar itself. Tune the two values below separately if needed. */
+  --bottom-gap:max(8px, calc(var(--safe-b) - 22px));    /* Notes list screen: bar bottom sits ~12px above the edge on iPhone, just clear of the home indicator */
+  --ed-bottom-gap:max(4px, calc(var(--safe-b) - 28px)); /* Note editor screen: two small corner buttons, centre (indicator) is empty, so it can sit lower */
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;position:fixed;inset:0;width:100%;background:var(--bg);color:var(--text);font-family:var(--font);overflow:hidden;overscroll-behavior:none}
+/* Keep the lock-screen artwork behind any iOS standalone bottom viewport gap. */
+body.locked{background:#000 url("image.png") center center / cover no-repeat;}
+/* App shell: fills the fixed body (= layout viewport). No 100dvh and no JS at rest;
+   JS only overrides height/transform while the keyboard is open (see fit()). */
+#app{position:absolute;inset:0;overflow:hidden}
+.ui{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+.hide{display:none!important}
+.view{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--bg);overflow:hidden}
+.scroll{position:relative;flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+svg{display:block}
+.circle,.pill{background:var(--btn);border:1px solid var(--btn-edge);display:flex;align-items:center;justify-content:center;
+  -webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);box-shadow:0 2px 10px rgba(0,0,0,.5)}
+.circle{width:var(--btn-size);height:var(--btn-size);border-radius:50%}
+.pill{height:var(--btn-size);border-radius:30px}
+.topbar{flex:none;padding:calc(var(--safe-t) + 18px) var(--side) 12px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+.topbar>*{flex:none}
+.topbar h1{flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* 100px pill = 2 border + 18 padding + 2x36 buttons + 8 gap. Previously the content box was
+   70px but two 36px buttons need 72px, so the flex items were squeezed into each other. */
+.pill.two{width:100px;justify-content:center;gap:8px;padding:0 9px}
+.pill.two button{flex:none;width:36px;height:36px;display:flex;align-items:center;justify-content:center}
+
+/* Home */
+#home .scroll{padding:0 var(--side) 16px}
+h1{font-size:var(--home-title);font-weight:700;margin:0;letter-spacing:.2px;line-height:44px}
+.section h2{font-size:var(--section);font-weight:700;margin:18px 0 12px;line-height:1.2}
+.card{background:var(--card);border-radius:var(--card-radius);overflow:hidden;margin-bottom:28px}
+.row-wrap{position:relative;overflow:hidden;background:var(--card)}
+.del{position:absolute;right:0;top:0;bottom:0;width:88px;background:var(--danger);color:#fff;font-size:16px;font-weight:600}
+.row{position:relative;background:var(--card);padding:10px 16px 9px 27px;min-height:59px;transition:transform .2s;cursor:pointer}
+.row::after{content:"";position:absolute;left:27px;right:16px;bottom:0;height:1px;background:var(--sep)}
+.row-wrap:last-child .row::after{display:none}
+.rt{font-size:var(--row-title);font-weight:500;line-height:23px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rs{font-size:var(--row-sub);color:var(--muted);line-height:22px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rs b{font-weight:400;margin-right:8px}
+.empty{color:var(--muted);text-align:center;margin-top:30vh;font-size:20px}
+.bottom{flex:none;padding:6px 28px var(--bottom-gap);display:flex;gap:16px;align-items:center}
+#app.kb .bottom{padding-bottom:8px}
+.search{flex:1;min-width:0;height:48px;border-radius:26px;padding:0 18px;gap:10px;justify-content:flex-start}
+.search input{flex:1;min-width:0;background:none;border:0;outline:0;color:var(--text);font:inherit;font-size:17px}
+.search input::placeholder{color:var(--muted)}
+.search input::-webkit-search-cancel-button{display:none}
+.bottom .circle{width:48px;height:48px;flex:none}
+
+/* Editor */
+#editor .scroll{padding:8px 26px 24px}
+.f{display:block;width:100%;border:0;outline:0;background:none;resize:none;overflow:hidden;padding:0;margin:0;
+  font-family:var(--font);caret-color:#ffd60a;-webkit-user-select:text;user-select:text;border-radius:0;-webkit-appearance:none}
+#title{font-size:var(--note-title);font-weight:700;line-height:34px;color:var(--body-text);margin-bottom:8px}
+#body{font-size:var(--note-body);line-height:var(--note-lh);color:var(--body-text);min-height:50svh;white-space:pre-wrap}
+#editor .bottom{justify-content:space-between;padding-top:4px;padding-bottom:var(--ed-bottom-gap)}
+/* Scoped to the bottom toolbar only. The unscoped '#editor .pill' rule also matched the header's
+   two-icon pill (.pill.two) and forced it to 48px, so Share and More overflowed onto each other. */
+#editor .bottom .pill{width:48px;height:48px;border-radius:50%}
+
+/* Magic Mode confirmation: one quick, subtle flicker of the three-dot icon (~160ms) */
+@-webkit-keyframes mgBlink{0%,100%{opacity:1}50%{opacity:.2}}
+@keyframes mgBlink{0%,100%{opacity:1}50%{opacity:.2}}
+#edMore.mgblink{-webkit-animation:mgBlink .16s ease-in-out 1;animation:mgBlink .16s ease-in-out 1}
+
+/* menu + toast */
+#veil{position:fixed;inset:0;z-index:20}
+#menu{position:fixed;z-index:21;right:16px;top:calc(var(--safe-t) + 70px);min-width:210px;background:#2c2c2ef0;border-radius:14px;overflow:hidden;
+  -webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px);box-shadow:0 8px 30px rgba(0,0,0,.6)}
+#menu button{display:block;width:100%;text-align:left;padding:14px 18px;font-size:17px;border-top:1px solid var(--sep)}
+#menu button:first-child{border-top:0}
+#menu .danger{color:var(--danger)}
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--safe-b) + 80px);background:#2c2c2e;padding:10px 16px;border-radius:14px;font-size:15px;z-index:30;max-width:90%;text-align:center}
+
+/* hidden-config popup: same look as #menu */
+#mg{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.4)}
+.mgc{position:absolute;left:50%;transform:translateX(-50%);top:calc(var(--safe-t) + 80px);width:min(86vw,320px);background:#2c2c2ef0;border-radius:14px;padding:16px;box-shadow:0 8px 30px rgba(0,0,0,.6);-webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px)}
+.mgc label{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:17px;margin-bottom:12px}
+.mgc input{width:60%;background:#1c1c1e;border:1px solid var(--sep);border-radius:10px;padding:9px 10px;color:var(--text);font:inherit;font-size:17px;outline:0;-webkit-user-select:text;user-select:text}
+#mgE{color:var(--danger);font-size:14px;min-height:0;margin-bottom:8px}
+/* Celebrities Name: Force Name popup (own ids so it can never collide with the Word List popup above) */
+#cfm{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.4)}
+#cfm .cfm-t{font-size:17px;font-weight:600;text-align:center;margin-bottom:12px}
+#cfm .mgc input{width:100%}
+#cfmE{color:var(--danger);font-size:14px;min-height:18px;margin:8px 0}
+.mgb{display:flex;border-top:1px solid var(--sep);margin:4px -16px -16px}
+.mgb button{flex:1;padding:14px;font-size:17px}.mgb button+button{border-left:1px solid var(--sep);font-weight:600}
+
+/* ===== Lock Screen (scoped to #lockRoot so it cannot affect the Notes app) ===== */
+body.locked #app{visibility:hidden}
+#lockRoot{
+  --key-size: clamp(62px, min(20.5vw, 10.2dvh), 80px);
+  --col-gap: clamp(16px, 6.5vw, 26px);
+  --row-gap: clamp(10px, 2.6dvh, 22px);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  position:fixed;inset:0;width:auto;height:auto;z-index:1000;
+  background:transparent;overflow:hidden;
+  font-family:var(--font);color:#fff;-webkit-font-smoothing:antialiased;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:manipulation;
+}
+:where(#lockRoot,#lockRoot *,#lockRoot *::before,#lockRoot *::after){box-sizing:border-box;margin:0;padding:0}
+#lockRoot .screen{position:absolute;inset:0;background-color:transparent;background-image:none;overflow:hidden;}
+#lockRoot .screen::before{content: ""; position: absolute; inset: 0; background: rgba(0, 0, 0, 0.32); transition: opacity 0.45s ease; pointer-events: none;}
+#lockRoot .passcode{position: relative; height: 100%; display: flex; flex-direction: column; align-items: center; padding-top: calc(var(--safe-top) + clamp(28px, 6dvh, 64px)); padding-bottom: calc(var(--safe-bottom) + 4px); transition: opacity 0.35s ease, transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);}
+#lockRoot .passcode__header{display: flex; flex-direction: column; align-items: center;}
+#lockRoot .passcode__title{font-size: clamp(21px, 5.9vw, 24px); font-weight: 500; letter-spacing: 0.2px; line-height: 1.2; text-align: center;}
+#lockRoot .dots{display: flex; gap: clamp(20px, 6.7vw, 26px); margin-top: clamp(16px, 2.8dvh, 26px);}
+#lockRoot .dot{width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid #fff; background: transparent; transition: background-color 0.08s linear;}
+#lockRoot .dot.is-filled{background: #fff;}
+#lockRoot .keypad{margin-top: calc(clamp(24px, 5dvh, 48px) + clamp(20px, 4.2dvh, 40px) + clamp(10px, 2.1dvh, 20px) + clamp(10px, 2.1dvh, 20px)); display: grid; grid-template-columns: repeat(3, var(--key-size)); grid-template-rows: repeat(4, var(--key-size)); column-gap: var(--col-gap); row-gap: var(--row-gap); justify-content: center; align-items: center; justify-items: center;}
+#lockRoot .key--zero{grid-column: 2;}
+#lockRoot .key{width: var(--key-size); height: var(--key-size); border: 0; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: var(--font); color: #fff; background: rgba(255, 255, 255, 0.22); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); cursor: pointer; outline: none; transition: background-color 0.3s ease, transform 0.3s ease;}
+#lockRoot .key__digit{font-size: clamp(30px, 9vw, 36px); font-weight: 300; line-height: 1;}
+#lockRoot .key__letters{min-height: 10px; margin-top: 3px; font-size: 10px; font-weight: 600; letter-spacing: 2px; line-height: 10px; padding-left: 2px;}
+#lockRoot .key:active{background: rgba(255, 255, 255, 0.5); transform: scale(0.97); transition-duration: 0s;}
+#lockRoot .key:focus-visible,#lockRoot .text-key:focus-visible{box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8);}
+#lockRoot .bottom-controls{margin-top: auto; transform: translateY(18px); display: grid; grid-template-columns: repeat(3, var(--key-size)); column-gap: var(--col-gap); justify-content: center; align-items: center;}
+#lockRoot .text-key{height: 44px; border: 0; background: transparent; color: #fff; font-family: var(--font); font-size: clamp(15px, 4.3vw, 17px); font-weight: 400; white-space: nowrap; display: flex; align-items: center; cursor: pointer; outline: none; transition: opacity 0.25s ease;}
+#lockRoot .text-key--emergency{grid-column: 1; justify-content: flex-start; font-size: clamp(14px, 4vw, 16px);}
+#lockRoot .text-key--cancel{grid-column: 3; justify-content: flex-end;}
+#lockRoot .text-key:active{opacity: 0.4; transition-duration: 0s;}
+@media (prefers-reduced-motion: reduce){#lockRoot .passcode,#lockRoot .screen::before,#lockRoot .key{transition-duration: 0.01s; transition-delay: 0s;}}
+
+</style>
+</head>
+<body class="ui locked">
+<div id="lockRoot">
+  <main class="screen" id="screen">
+
+    <section class="passcode" id="passcode" aria-label="Passcode entry">
+
+      <!-- Container 1: heading + indicators -->
+      <header class="passcode__header">
+        <h1 class="passcode__title">Enter Passcode</h1>
+        <div class="dots" id="dots" role="img" aria-label="0 of 4 digits entered">
+          <span class="dot"></span>
+          <span class="dot"></span>
+          <span class="dot"></span>
+          <span class="dot"></span>
+        </div>
+      </header>
+
+      <!-- Container 2: numeric keypad -->
+      <div class="keypad" id="keypad">
+        <button class="key" type="button" data-digit="1" aria-label="1"><span class="key__digit">1</span><span class="key__letters"></span></button>
+        <button class="key" type="button" data-digit="2" aria-label="2"><span class="key__digit">2</span><span class="key__letters">ABC</span></button>
+        <button class="key" type="button" data-digit="3" aria-label="3"><span class="key__digit">3</span><span class="key__letters">DEF</span></button>
+
+        <button class="key" type="button" data-digit="4" aria-label="4"><span class="key__digit">4</span><span class="key__letters">GHI</span></button>
+        <button class="key" type="button" data-digit="5" aria-label="5"><span class="key__digit">5</span><span class="key__letters">JKL</span></button>
+        <button class="key" type="button" data-digit="6" aria-label="6"><span class="key__digit">6</span><span class="key__letters">MNO</span></button>
+
+        <button class="key" type="button" data-digit="7" aria-label="7"><span class="key__digit">7</span><span class="key__letters">PQRS</span></button>
+        <button class="key" type="button" data-digit="8" aria-label="8"><span class="key__digit">8</span><span class="key__letters">TUV</span></button>
+        <button class="key" type="button" data-digit="9" aria-label="9"><span class="key__digit">9</span><span class="key__letters">WXYZ</span></button>
+
+        <button class="key key--zero" type="button" data-digit="0" aria-label="0"><span class="key__digit">0</span><span class="key__letters"></span></button>
+      </div>
+
+      <!-- Container 3: Emergency / Cancel, kept low -->
+      <div class="bottom-controls" id="bottomControls">
+        <button class="text-key text-key--emergency" type="button" data-action="emergency">Emergency</button>
+        <button class="text-key text-key--cancel" type="button" data-action="cancel">Cancel</button>
+      </div>
+
+    </section>
+
+
+  </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var LENGTH = 4;
+  var K_POS  = "notes.forcePos";    // session (sessionStorage): the selected entry number (the force NAME lives in localStorage 'notes.forceName')
+  var root = document.getElementById("lockRoot");
+  var passcode = document.getElementById("passcode");
+  var dotsWrap = document.getElementById("dots");
+  var dots = Array.prototype.slice.call(document.querySelectorAll("#lockRoot .dot"));
+
+  var code = "";
+  var unlocked = false;
+  var active = true;       // lock screen still on top: document-level handlers only act while true
+
+  function render() {
+    dots.forEach(function (dot, i) {
+      dot.classList.toggle("is-filled", i < code.length);
+    });
+    dotsWrap.setAttribute(
+      "aria-label",
+      code.length + " of " + LENGTH + " digits entered"
+    );
+  }
+
+  function addDigit(digit) {
+    if (unlocked || code.length >= LENGTH) return;
+    code += digit;
+    render();
+    if (code.length === LENGTH) {
+      // Lock input immediately so a fifth digit can't be entered.
+      unlocked = true;
+      unlock();
+    }
+  }
+
+  function removeDigit() {
+    if (unlocked || code.length === 0) return;
+    code = code.slice(0, -1);
+    render();
+  }
+
+  function clearCode() {
+    if (unlocked) return;
+    code = "";
+    render();
+  }
+
+  /* Magic code: 5 d d 1 with dd in 01..99. Returns the entry number, or 0 if not a magic code. */
+  function magicPos(c) {
+    if (c.length !== 4 || c.charAt(0) !== "5" || c.charAt(3) !== "1") return 0;
+    var n = parseInt(c.slice(1, 3), 10);
+    return (n >= 1 && n <= 99) ? n : 0;
+  }
+
+  function unlock() {
+    // Remember ONLY the selected entry number for this session. Every unlock overwrites the previous
+    // selection, so a normal code clears it. The saved force name is never touched here, and whether
+    // anything is forced is decided later, inside the Celebrities Name note, from name + number.
+    var pos = magicPos(code);
+    try {
+      if (pos) sessionStorage.setItem(K_POS, String(pos));
+      else sessionStorage.removeItem(K_POS);
+    } catch (e) {}
+
+    // Straight into the Notes app: no intermediate screen, no delay.
+    active = false;
+    document.body.classList.remove("locked");
+    if (root.parentNode) root.parentNode.removeChild(root);
+  }
+
+  // On-screen buttons (keypad + bottom controls), via one delegated listener
+  passcode.addEventListener("click", function (event) {
+    var btn = event.target.closest("button");
+    if (!btn) return;
+
+    if (btn.dataset.digit !== undefined) {
+      addDigit(btn.dataset.digit);
+    } else if (btn.dataset.action === "cancel") {
+      clearCode(); // Cancel resets the entry
+    } else if (btn.dataset.action === "emergency") {
+      clearCode(); // Placeholder: no real emergency calling
+    }
+
+    // Keep focus off buttons so Enter/Space can't re-trigger them.
+    btn.blur();
+  });
+
+  // Physical keyboard (ignored after unlock)
+  document.addEventListener("keydown", function (event) {
+    if (!active) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+    if (/^[0-9]$/.test(event.key)) {
+      event.preventDefault();
+      addDigit(event.key);
+    } else if (event.key === "Backspace") {
+      event.preventDefault();
+      removeDigit();
+    } else if (event.key === "Enter" || event.key === " ") {
+      // Never bypass the four-digit requirement.
+      event.preventDefault();
+    }
+  });
+
+  // Block pinch/double-tap zoom and rubber-band scrolling on touch devices (lock screen only).
+  document.addEventListener("touchmove", function (e) { if (active) e.preventDefault(); }, { passive: false });
+  document.addEventListener("gesturestart", function (e) { if (active) e.preventDefault(); });
+  document.addEventListener("contextmenu", function (e) { if (active) e.preventDefault(); });
+
+  render();
+})();
+</script>
+
+
+<div id="app">
+<!-- HOME -->
+<main id="home" class="view">
+  <div class="topbar"><h1>Notes</h1>
+    <button class="circle" id="homeMore" aria-label="More">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><circle cx="4.5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19.5" cy="12" r="2"/></svg>
+    </button>
+  </div>
+  <div class="scroll" id="homeScroll">
+    <div id="list"></div>
+  </div>
+  <div class="bottom">
+    <label class="pill search">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>
+      <input id="search" type="search" placeholder="Search" enterkeyhint="search" autocomplete="off" aria-label="Search notes">
+    </label>
+    <button class="circle" id="newHome" aria-label="New note">
+      <svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4H8a5 5 0 0 0-5 5v9a5 5 0 0 0 5 5h9a5 5 0 0 0 5-5v-4"/><path d="M19.5 2.8a2 2 0 0 1 2.9 2.8L12.5 15.5 8.5 16.5l1-4z"/></svg>
+    </button>
+  </div>
+</main>
+
+<!-- EDITOR -->
+<main id="editor" class="view hide">
+  <div class="topbar">
+    <button class="circle" id="back" aria-label="Back">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4L7 12l8 8"/></svg>
+    </button>
+    <div class="pill two">
+      <button id="share" aria-label="Share">
+        <svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 9H7.5A2.5 2.5 0 0 0 5 11.500v9A2.500 2.500 0 0 0 7.500 23h11a2.500 2.500 0 0 0 2.500-2.500v-9A2.500 2.500 0 0 0 18.500 9H17"/><path d="M13 16V3M8.500 7.500L13 3l4.500 4.500"/></svg>
+      </button>
+      <button id="edMore" aria-label="More">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><circle cx="4.500" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19.500" cy="12" r="2"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="scroll" id="edScroll">
+    <textarea id="title" class="f" rows="1" placeholder="Title" aria-label="Note title" autocapitalize="sentences"></textarea>
+    <textarea id="body" class="f" placeholder="" aria-label="Note body"></textarea>
+  </div>
+  <div class="bottom">
+    <div class="pill" style="width:48px;height:48px;border-radius:50%;padding:0">
+      <button id="listBtn" style="width:48px;height:48px;display:flex;align-items:center;justify-content:center" aria-label="Toggle list: bullet, numbered, none">
+        <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="2.200" stroke-linecap="round"><circle cx="7" cy="8" r="3.500"/><circle cx="7" cy="21" r="3.500"/><path d="M14 8h12M14 21h12"/></svg>
+      </button>
+    </div>
+    <button class="circle" id="newEd" style="width:48px;height:48px" aria-label="New note">
+      <svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4H8a5 5 0 0 0-5 5v9a5 5 0 0 0 5 5h9a5 5 0 0 0 5-5v-4"/><path d="M19.500 2.800a2 2 0 0 1 2.900 2.800L12.500 15.500 8.500 16.500l1-4z"/></svg>
+    </button>
+  </div>
+</main>
+
+</div><!-- /#app -->
+<div id="veil" class="hide"></div>
+<div id="menu" class="hide"></div>
+<div id="toast" class="hide" role="status"></div>
+
+<script>
+(()=>{
+const $=s=>document.querySelector(s);
+const home=$('#home'),editor=$('#editor'),list=$('#list'),title=$('#title'),body=$('#body');
+let notes=[],db=null,cur=null,saveTimer=null,dirty=false,swiped=0;
+
+/* ---------- Storage (IndexedDB) ---------- */
+const openDB=()=>new Promise((res,rej)=>{
+  if(!window.indexedDB)return rej(new Error('IndexedDB unavailable'));
+  const r=indexedDB.open('notes-app',2);
+  r.onupgradeneeded=()=>{const d=r.result;if(!d.objectStoreNames.contains('notes'))d.createObjectStore('notes',{keyPath:'id'});if(!d.objectStoreNames.contains('meta'))d.createObjectStore('meta',{keyPath:'k'})};
+  r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);
+});
+const tx=(mode,fn)=>new Promise((res,rej)=>{
+  if(!db)return rej(new Error('No database'));
+  const t=db.transaction('notes',mode),q=fn(t.objectStore('notes'));
+  t.oncomplete=()=>res(q&&q.result);t.onerror=t.onabort=()=>rej(t.error||new Error('Transaction failed'));
+});
+const persist=n=>tx('readwrite',s=>s.put(n)).catch(()=>toast('⚠︎ Could not save. Notes are not being stored.',4000));
+const remove=id=>tx('readwrite',s=>s.delete(id)).catch(()=>toast('⚠︎ Could not delete from storage.',4000));
+
+/* ---------- Helpers ---------- */
+let toastT;
+function toast(m,ms=1800){const t=$('#toast');t.textContent=m;t.classList.remove('hide');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.add('hide'),ms)}
+const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+const fmt=t=>{const d=new Date(t);return `${d.getMonth()+1}/${d.getDate()}/${String(d.getFullYear()).slice(-2)}`};
+const firstLine=s=>(s.split('\n').find(l=>l.trim())||'').trim();
+const noteTitle=n=>n.title.trim()||firstLine(n.body)||'New Note';
+const notePreview=n=>{
+  const b=C.view(n);   // what the note actually displays (Celebrities Name only; every other note returns its own body)
+  if(!n.title.trim()){const ls=b.split('\n').map(l=>l.trim()).filter(Boolean);return ls[1]||'No additional text'}
+  return firstLine(b)||'No additional text';
+};
+function groupName(t){
+  const now=new Date(),d=new Date(t),sod=x=>new Date(x.getFullYear(),x.getMonth(),x.getDate()).getTime();
+  const days=Math.round((sod(now)-sod(d))/864e5);
+  if(days<=0)return 'Today';if(days===1)return 'Yesterday';if(days<=7)return 'Previous 7 Days';if(days<=30)return 'Previous 30 Days';
+  if(d.getFullYear()===now.getFullYear())return d.toLocaleString('en-US',{month:'long'});
+  return String(d.getFullYear());
+}
+
+/* ---------- Home ---------- */
+function render(){
+  const q=$('#search').value.trim().toLowerCase();
+  const vis=notes.filter(n=>!q||(n.title+'\n'+n.body).toLowerCase().includes(q)).sort((a,b)=>b.updated-a.updated);
+  if(!vis.length){list.innerHTML=notes.length?'<div class="empty">No Results</div>':'';return}
+  const groups=[];
+  vis.forEach(n=>{const g=groupName(n.updated);let last=groups[groups.length-1];if(!last||last.name!==g){last={name:g,items:[]};groups.push(last)}last.items.push(n)});
+  list.innerHTML=groups.map(g=>`<section class="section"><h2>${esc(g.name)}</h2><div class="card">${g.items.map(n=>
+    `<div class="row-wrap" data-id="${n.id}"><button class="del">Delete</button><div class="row" role="button" tabindex="0"><div class="rt">${esc(noteTitle(n))}</div><div class="rs"><b>${fmt(n.updated)}</b>${esc(notePreview(n))}</div></div></div>`).join('')}</div></section>`).join('');
+  list.querySelectorAll('.row-wrap').forEach(bindRow);
+}
+function closeRow(w){w.classList.remove('open');w.querySelector('.row').style.transform=''}
+function bindRow(w){
+  const r=w.querySelector('.row'),id=w.dataset.id;let x0,y0,mode,base,cx=0;
+  r.addEventListener('touchstart',e=>{x0=e.touches[0].clientX;y0=e.touches[0].clientY;mode=0;base=w.classList.contains('open')?-88:0;cx=base;
+    document.querySelectorAll('.row-wrap.open').forEach(o=>o!==w&&closeRow(o));r.style.transition='none'},{passive:true});
+  r.addEventListener('touchmove',e=>{const dx=e.touches[0].clientX-x0,dy=e.touches[0].clientY-y0;
+    if(!mode){if(Math.abs(dx)>8&&Math.abs(dx)>Math.abs(dy))mode=1;else if(Math.abs(dy)>8)mode=2}
+    if(mode===1){e.preventDefault();cx=Math.max(-88,Math.min(0,base+dx));r.style.transform=`translateX(${cx}px)`}},{passive:false});
+  r.addEventListener('touchend',()=>{r.style.transition='';if(mode===1){const o=cx<-44;w.classList.toggle('open',o);r.style.transform=o?'translateX(-88px)':'';swiped=Date.now()}});
+  r.addEventListener('click',()=>{if(Date.now()-swiped<400)return;if(w.classList.contains('open')){closeRow(w);return}openNote(id)});
+  r.addEventListener('keydown',e=>{if(e.key==='Enter')openNote(id)});
+  w.querySelector('.del').addEventListener('click',()=>deleteNote(id,true));
+}
+async function deleteNote(id,ask){
+  if(ask&&!confirm('Delete this note?'))return;
+  notes=notes.filter(n=>n.id!==id);await remove(id);render();
+}
+
+/* ---------- Editor ---------- */
+const edScroll=$('#edScroll');
+function grow(el){const t=edScroll.scrollTop;el.style.height='auto';el.style.height=el.scrollHeight+'px';edScroll.scrollTop=t} // keep scroll position while resizing
+/* Measure caret's y-offset inside a textarea using a hidden mirror element */
+const mirror=document.createElement('div');
+function caretY(el){
+  const cs=getComputedStyle(el);
+  mirror.style.cssText=`position:absolute;visibility:hidden;top:0;left:-9999px;white-space:pre-wrap;overflow-wrap:break-word;padding:0;border:0;width:${el.clientWidth}px;font-family:${cs.fontFamily};font-size:${cs.fontSize};font-weight:${cs.fontWeight};line-height:${cs.lineHeight};letter-spacing:${cs.letterSpacing}`;
+  mirror.textContent=el.value.slice(0,el.selectionStart);
+  const m=document.createElement('span');m.textContent='\u200b';mirror.appendChild(m);
+  document.body.appendChild(mirror);const y=m.offsetTop;mirror.remove();
+  return {y,lh:parseFloat(cs.lineHeight)||26};
+}
+/* Scroll the editor's own scroller just enough to show the caret line (never the page) */
+function ensureCaret(){
+  const el=document.activeElement;if(el!==body&&el!==title)return;
+  const {y,lh}=caretY(el),abs=el.offsetTop+y,pad=12;
+  if(abs<edScroll.scrollTop+pad)edScroll.scrollTop=Math.max(0,abs-pad);
+  else if(abs+lh>edScroll.scrollTop+edScroll.clientHeight-pad)edScroll.scrollTop=abs+lh-edScroll.clientHeight+pad;
+}
+function show(v){home.classList.toggle('hide',v!=='home');editor.classList.toggle('hide',v!=='editor')}
+function openNote(id,focus){
+  cur=notes.find(n=>n.id===id);if(!cur)return;
+  M.reset();title.value=cur.title;body.value=C.view(cur);show('editor');grow(title);grow(body);
+  $('#edScroll').scrollTop=0;history.pushState({e:1},'');
+  if(focus)title.focus();
+}
+function newNote(){
+  flush();
+  const n={id:uid(),title:'',body:'',created:Date.now(),updated:Date.now()};
+  notes.push(n);
+  if(!editor.classList.contains('hide')){cur=n;title.value='';body.value='';grow(title);grow(body);title.focus();return}
+  openNote(n.id,true);
+}
+function onEdit(){
+  if(!cur)return;
+  grow(title);grow(body);ensureCaret();
+  M.beforeEdit();cur.title=title.value;cur.body=C.store(cur,body.value);cur.updated=Date.now();dirty=true;
+  clearTimeout(saveTimer);saveTimer=setTimeout(flush,350);
+}
+function flush(){
+  clearTimeout(saveTimer);
+  if(cur&&dirty){dirty=false;persist({...cur})}
+}
+function leaveEditor(){
+  M.reset();flush();
+  if(cur&&!cur.title.trim()&&!cur.body.trim()){const id=cur.id;notes=notes.filter(n=>n.id!==id);remove(id)} // drop untouched empty notes
+  C.closePopup();cur=null;document.activeElement&&document.activeElement.blur();show('home');render();
+}
+title.addEventListener('input',onEdit);body.addEventListener('input',onEdit);
+title.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();body.focus()}});
+$('#edScroll').addEventListener('click',e=>{if(e.target.id==='edScroll'){body.focus();body.setSelectionRange(body.value.length,body.value.length)}});
+
+/* Auto-continue lists: "- item" and "1. item" */
+body.addEventListener('keydown',e=>{
+  if(e.key!=='Enter'||e.isComposing||body.selectionStart!==body.selectionEnd)return;
+  const v=body.value,s=body.selectionStart,ls=v.lastIndexOf('\n',s-1)+1,m=v.slice(ls,s).match(/^(\s*)(?:(\d+)\.|([-•*])) (.*)$/);
+  if(!m)return;e.preventDefault();
+  if(!m[4].trim())body.setRangeText('',ls,s,'end');
+  else body.setRangeText('\n'+m[1]+(m[2]?(+m[2]+1)+'.':m[3])+' ',s,s,'end');
+  body.dispatchEvent(new Event('input'));
+});
+/* List button: current line cycles bullet -> numbered -> none */
+$('#listBtn').addEventListener('click',()=>{
+  const v=body.value,s=body.selectionStart,ls=v.lastIndexOf('\n',s-1)+1;let le=v.indexOf('\n',s);if(le<0)le=v.length;
+  const line=v.slice(ls,le);let nl;
+  if(/^- /.test(line))nl='1. '+line.slice(2);else if(/^\d+\. /.test(line))nl=line.replace(/^\d+\. /,'');else nl='- '+line;
+  body.focus();body.setRangeText(nl,ls,le,'end');body.dispatchEvent(new Event('input'));
+});
+
+/* ---------- Menus / share ---------- */
+function menu(items){
+  const m=$('#menu');m.innerHTML='';
+  items.forEach(i=>{const b=document.createElement('button');b.textContent=i.label;if(i.danger)b.className='danger';b.onclick=()=>{closeMenu();i.fn()};m.appendChild(b)});
+  m.classList.remove('hide');$('#veil').classList.remove('hide');
+}
+function closeMenu(){$('#menu').classList.add('hide');$('#veil').classList.add('hide')}
+$('#veil').addEventListener('click',closeMenu);
+const noteText=()=>(cur.title?cur.title+'\n\n':'')+C.view(cur);
+$('#homeMore').addEventListener('click',()=>menu(notes.length?[{label:'Delete All Notes',danger:1,fn:async()=>{
+  if(!confirm('Delete ALL notes on this device? This cannot be undone.'))return;
+  const ids=notes.filter(n=>!M.isWL(n.id)&&!C.isCeleb(n.id)).map(n=>n.id);notes=notes.filter(n=>M.isWL(n.id)||C.isCeleb(n.id));for(const id of ids)await remove(id);render()}}]:[{label:'No notes yet',fn(){}}]));
+$('#edMore').addEventListener('click',()=>{if(M.eat())return;menu([
+  {label:'Copy Note',fn:()=>navigator.clipboard?.writeText(noteText()).then(()=>toast('Copied'),()=>toast('Copy failed'))},
+  {label:'Delete Note',danger:1,fn:async()=>{if(!confirm('Delete this note?'))return;const id=cur.id;cur=null;dirty=false;notes=notes.filter(n=>n.id!==id);await remove(id);history.back()}}])});
+$('#share').addEventListener('click',()=>{
+  const t=noteText();
+  if(navigator.share)navigator.share({title:cur.title,text:t}).catch(()=>{});
+  else navigator.clipboard?.writeText(t).then(()=>toast('Copied to clipboard'),()=>toast('Sharing unavailable'));
+});
+
+/* ---------- Navigation ---------- */
+$('#back').addEventListener('click',()=>history.back());
+window.addEventListener('popstate',()=>{if(!editor.classList.contains('hide'))leaveEditor()});
+$('#newHome').addEventListener('click',newNote);$('#newEd').addEventListener('click',()=>{if(M.eat())return;newNote()});
+$('#search').addEventListener('input',render);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)flush()});
+window.addEventListener('pagehide',flush);
+
+/* ---------- Keyboard-aware viewport (iOS) ---------- */
+const vv=window.visualViewport,app=$('#app');let raf=0;
+/* At rest the CSS alone sizes the app (fixed body, inset:0), so the bottom controls cannot depend on
+   visualViewport values that iOS standalone mode reports inconsistently. Only while the keyboard is
+   open do we shrink the shell to the visible area and follow Safari's pan. */
+function fit(){
+  cancelAnimationFrame(raf);
+  raf=requestAnimationFrame(()=>{
+    const h=vv?vv.height:innerHeight;
+    const kb=!!vv&&vv.scale<1.01&&innerHeight-h>120;      // ignore pinch-zoom
+    app.classList.toggle('kb',kb);
+    if(kb){app.style.height=h+'px';app.style.transform=`translateY(${vv.offsetTop}px)`}
+    else{app.style.height='';app.style.transform=''}
+    if(window.scrollY||window.scrollX)window.scrollTo(0,0);
+    ensureCaret();
+  });
+}
+if(vv){vv.addEventListener('resize',fit);vv.addEventListener('scroll',fit)}
+window.addEventListener('orientationchange',fit);window.addEventListener('resize',fit);window.addEventListener('pageshow',fit);fit();
+
+
+/* =====================================================================
+   WORD-FORCE MODULE (hidden). Sections: storage, word list, popup,
+   long-press gestures, scroll detector, force engine.
+   Base text lives in cur.body (persisted); forcing only permutes the
+   textarea's *view* (never persisted unless the user types), so no words
+   are ever lost, duplicated or progressively damaged.
+   ===================================================================== */
+const M=(()=>{
+const TUNE={fastV:2.0,minDistVH:0.4,settleMs:150,minWords:8,holdCfg:1300,holdNew:700,maxPos:9};
+const WORDS='that this with from your have more will home about page search free other time they site what which their news there only when contact here business also help view online first been would were services some these click like service than find price date back people list name just over state year into email health world next used work last most products music data make them should product system post city policy number such please available copyright support message after best software then good video well where info rights public books high school through each links review years order very privacy book items company read group need many user said does under general research mail full reviews program life know games days part could great united hotel real item center must store travel comments made report member details line terms before hotels send right type because local those using results office education national design take posted internet address community within states area want phone shipping reserved subject between forum family long based code show even black check special prices website index being women much sign file link open today south case project same pages version section found sports house related security both county photo game members power while care network down computer systems three total place following download without access think north resources current posts media control water history pictures size personal since including guide shop directory board location change white text small rating rate children during return students shopping account times sites level digital profile previous form events love john main call hours image title insurance another shall property class still money quality every listing content country private little visit save tools reply customer compare movies include college value article york card jobs provide food source author different press learn sale around print course canada process teen room stock training credit point join science advanced west sales look english left team estate select photos thread week category note live large gallery table register however november market library really action start series model features industry plan human provided required second cost movie forums march better questions going medical test friend come server study cart staff articles feedback again play looking issues never users complete street topic comment financial things working against standard person below mobile less blog party payment equipment login student programs offers legal above recent park stores side problem give memory social august quote language story sell options rates create body young important field east paper single club example girls password latest something road gift question changes night hard texas four poker status browse issue range building seller court always result audio light write offer blue groups easy given files event release analysis request china making picture needs possible might month major star areas future space committee hand cards problems meeting become interest child keep enter share similar garden schools million added reference companies listed baby learning energy delivery popular term film stories computers journal reports welcome central images president notice original head radio until cell color self council away includes track archive once others agreement format least society months safety friends sure trade edition cars messages marketing tell further updated able having provides already green studies close common drive specific several gold living called short arts display limited powered solutions means director daily beach past natural whether five upon period planning database says official weather land average done technical window region island record direct records district calendar costs style front statement update parts ever downloads early miles sound resource present either document word works material bill written talk federal hosting rules final adult tickets thing centre cheap kids finance true minutes else mark third rock gifts reading topics tips plus auto cover usually edit together videos percent fast function fact unit getting global tech meet economic player projects lyrics often subscribe submit amount watch included feel though bank risk thanks deals various words james weight town heart received choose treatment archives points knowledge magazine error camera girl currently toys clear golf receive domain methods chapter makes policies loan wide beauty manager india position taken sort listings models michael known half cases step simple quick none wireless license paul lake whole annual published later basic shows corporate church method purchase customers active response practice hardware figure materials fire holiday chat enough designed along among death writing speed countries loss face brand discount higher effects created remember standards yellow political increase advertise kingdom base near thought stuff french storage japan doing loans shoes entry stay nature orders summary turn mean growth notes agency king activity copy although drug pics western income force cash overall river package contents seen players engine port album regional stop supplies started institute views plans double build screen exchange types soon sponsored lines continue across benefits needed season apply someone held anything printer condition effective believe effect asked mind selection casino lost tour menu volume cross anyone mortgage hope silver wish inside solution mature role rather weeks addition came supply nothing certain executive running lower necessary union jewelry according clothing fine names homepage hour skills bush islands advice career military rental decision leave teens huge woman kind sellers middle move cable taking values division coming object lesbian machine logo length actually nice score client returns capital follow sample sent shown culture band flash lead choice went starting courses consumer airport foreign artist outside furniture levels channel letter mode phones ideas structure fund summer allow degree contract button releases homes super male matter custom virginia almost took located multiple editor cause potential song focus late fall featured idea rooms female primary cancer numbers reason tool browser spring answer voice friendly schedule documents purpose feature comes police everyone approach cameras brown physical operating hill maps medicine deal hold ratings forms glass happy smith wanted developed thank safe unique survey prior telephone sport ready feed animal sources regular secure therefore simply evidence station round favorite option master valley recently probably rentals built blood worldwide improve publisher hall larger anti networks earth parents impact transfer kitchen strong wedding hospital ground overview ship owners disease excellent paid perfect hair classic basis command cities william express award distance tree peter ensure thus wall involved extra interface partners budget rated guides success maximum operation existing quite selected patients beautiful warning wine locations horse vote forward flowers stars lists owner retail animals useful directly ways providing rule housing takes bring catalog searches trying mother authority told traffic programme joined input strategy feet agent valid modern senior teaching door grand testing trial charge units instead cool normal wrote ships entire leading metal positive fitness chinese opinion football abstract uses output funds greater likely develop employees artists java guest seems pass relations trust contains session republic fees vacation century academic completed skin graphics mary expected ring grade dating pacific mountain filter mailing vehicle longer consider northern behind panel floor german buying match proposed default require boys outdoor deep morning otherwise allows rest protein plant reported pool mini politics partner authors boards faculty parties fish mission string sense modified pack released stage internal goods born unless detailed race approved target except character ability maybe functions moving brands places pretty spain southern yourself winter battery youth pressure submitted boston debt keywords medium core break purposes sets dance wood itself defined papers playing awards studio reader virtual device answers rent remote dark external regarding offered theory enjoy remove surface minimum visual host variety teachers martin manual block subjects agents increased repair fair civil steel songs fixed wrong beginning hands finally updates desktop classes paris gets sector capacity requires jersey fully father electric quotes officer driver dead respect unknown specified mike trip worth poor teacher eyes workers farm peace campus showing creative coast benefit progress funding devices lord grant agree fiction hear sometimes watches careers beyond goes families museum transport blogs wife accepted former hits zone complex galleries presented jack flat flow agencies parent michigan setting scale stand economy highest helpful monthly critical frame musical secretary path employee chief gives bottom magazines packages detail laws changed heard begin colorado royal clean switch largest titles relevant justice connect bible basket applied weekly described demand suite vegas square attention advance skip diet army auction gear allowed correct nation selling lots piece sheet firm seven older elements species jump cells module resort facility random pricing minister motion looks fashion visitors monitor trading forest calls whose coverage couple giving chance vision ball ending clients actions listen discuss accept naked goal sold wind clinical situation sciences markets lowest highly appear emergency lives currency leather determine palm patient actual stone commerce ringtones perhaps persons difficult satellite tests village accounts amateur pain factors coffee settings buyer cultural easily oral ford poster edge root closed holidays pink balance graduate replies shot initial label thinking recommend canon league waste minute provider optional cold sections chair fishing effort phase fields fantasy letters motor professor context install shirt apparel generally continued foot mass crime count breast johnson quickly dollars websites religion claim driving surgery patch heat wild measures miss chemical doctor task reduce brought himself component enable exercise guarantee leader diamond processes soft servers alone meetings seconds jones keyword interests flight congress fuel username walk produced paperback wait supported pocket saint rose freedom argument creating drugs joint premium providers fresh attorney upgrade factor growing thousands stream pick hearing eastern auctions therapy entries dates generated signed upper serious prime limit began louis steps errors shops efforts informed thoughts creek worked quantity urban practices sorted reporting essential myself tours platform load affiliate labor admin nursing defense machines tags heavy covered recovery guys merchant expert universal protect drop solid languages became orange vehicles prevent theme rich campaign marine guitar finding examples saying spirit claims challenge seem affairs touch intended towards goals hire election suggest branch charges serve reasons magic mount smart talking gave ones avoid certified manage corner rank computing element birth virus abuse requests separate quarter procedure tables define racing religious facts breakfast column plants faith chain developer identify avenue missing died domestic moved reach mental viewed moment extended sequence inch attack sorry centers opening damage reserve recipes gamma plastic produce snow placed truth counter failure follows weekend dollar camp films bridge native fill williams movement printing baseball owned approval draft chart played contacts jesus readers clubs equal adventure matching offering shirts profit leaders posters assistant variable expect parking headlines yesterday compared wholesale workshop russia gone codes kinds extension golden teams fort lighting senate forces funny brother gene turned portable tried disc returned pattern boat named theatre laser earlier sponsor classical icon warranty dedicated direction harry objects ends delete evening assembly nuclear taxes mouse signal criminal issued brain sexual powerful dream obtained false cast flower felt personnel passed supplied falls soul aids opinions promote stated stats appears carry flag decided covers advantage hello designs maintain tourism priority adults clips savings graphic atom payments estimated binding brief ended winning eight anonymous iron straight script served wants prepared void dining alert interview framework disk installed queen credits clearly handle sweet desk criteria hong vice associate truck behavior enlarge revenue measure changing votes duty looked bear gain festival ocean flights experts signs lack depth whatever logged laptop vintage train exactly explore concept nearly eligible checkout reality forgot handling origin knew gaming feeds billion faster bought nations route followed broken frank alaska zoom blow battle anime speak decisions protocol query clip editorial equity speech wire rural shared sounds tape strategic judge spam economics acid bytes cent forced fight apartment height null zero speaker filed obtain offices designer remain managed failed marriage roll banks secret bath kelly leads negative favorites theater springs perform healthy estimates font assets injury joseph ministry drivers lawyer figures married protected proposal sharing portal waiting birthday beta fail gratis banking officials toward slightly assist conduct contained lingerie calling jazz serving bags profiles comics matters houses postal wear controls breaking combined ultimate wales frequency minor finish residents noted displayed reduced physics rare spent performed extreme samples bars reviewed forecast removed helps singles cycle amounts contain accuracy dual rise sleep bird pharmacy brazil creation static scene hunter addresses lady crystal famous writer chairman violence fans speakers drink academy dynamic gender permanent dell cleaning portfolio practical delivered exclusive seat concerns colour vendor intel utilities officers reduction bids referred supports nutrition recording regions junior toll cape rings meaning secondary wonderful mine ladies henry ticket announced guess agreed whom soccer math import posting presence instant mentioned automatic viewing majority connected dogs directors aspects ahead moon scheme utility preview manner matrix devel amendment despite strength turkey libraries proper degrees delta fear seeking inches phoenix shares principal daughter standing comfort colors wars cisco ordering kept alpha appeal cruise bonus bookmark buildings specials beat household batteries adobe smoking becomes drives arms improved trees achieve positions dress dealer nearby carried happen exposure hide permalink signature gambling refer miller provision outdoors clothes caused luxury babes frames certainly indeed newspaper circuit layer printed slow removal easier liability trademark printers nine adding mostly eric spot prints spend factory interior revised grow optical promotion relative amazing clock identity suites feeling hidden victoria serial relief revision broadband influence ratio rain onto planet webmaster copies recipe permit seeing proof diff tennis bass bedroom empty instance hole pets ride licensed bureau represent pair ideal specs recorded pieces finished parks dinner lawyers stress cream runs trends yeah discover patterns boxes hills fourth advisor evil aware shape evolution stations suggested remains greatest firms concerned euro operator generic usage charts mixed census peak exist wheel transit suppliers salt compact poetry lights tracking angel bell keeping attempt receiving matches width noise engines forget array discussed accurate climate alcohol greek managing sister walking explain smaller newest establish happened expressed jeff extent sharp lesbians lane paragraph kill export managers aircraft modules conflict conducted versions employer occur knows describe concern backup requested citizens heritage personals immediate holding trouble spread coach expand audience assigned jordan ages plug cook affect virgin raised directed dealers searching sporting helping affected bike totally plate expenses indicate blonde favourite lose organic seek albums cheats extremely contracts guests hosted diseases chemistry tony kits variables agenda anyway continues tracks advisory logic template prince circle soil grants anywhere responses investor leaving wildlife matt cooking speaking sponsors unlimited respond sizes plain exit entered keys launch wave checking costa printable holy acts guidance mesh trail symbol crafts highway buddy hardcover observed dean setup poll booking glossary fiscal celebrity styles filled bond channels appendix notify blues chocolate portion scope supplier cables cotton biology dental killed border ancient debate starts pregnancy causes biography leisure learned notebook explorer historic attached opened husband disabled crazy upcoming concert scores financing comedy adopted efficient weblog linear specialty bears jean carrier edited constant visa mouth meter linked portland concepts reflect pure deliver wonder lessons fruit begins qualified reform lens alerts treated discovery draw relating assume alliance confirm warm neither lewis offline leaves engineer lifestyle replace clearance inventory converter babe checks reached becoming safari objective indicated sugar crew legs stick relation enabled genre slide volunteer tested rear enhance exact bound parameter adapter processor node formal lock hockey storm micro colleges laptops mile showed editors threads bowl supreme brothers presents tank dolls estimate encourage navy consumers cancel limits territory weapons paint delay pilot outlet resulting novel execution increases ultra winner episode potter dish plays bulletin indicates modify oxford truly painting committed extensive universe candidate databases patent slot eating planned watching lodge messenger mirror discounts sterling sessions kernel stocks buyers journals gray catalogue charged broad chosen demo greece swiss labour hate terminal nights behalf liquid rice loop salary foods gourmet guard properly orleans saving remaining empire resume twenty newly raise prepare avatar depending illegal expansion vary hundreds helped premier tomorrow purchased milk decide consent drama visiting downtown keyboard contest collected bands boot suitable millions lunch audit push chamber guinea findings muscle featuring implement clicking scheduled polls typical tower yours chicken temporary attend shower alan sending tonight dear shell province catholic awareness governor beer seemed swimming spyware formula packaging solar catch jane reliable northwest doubt earn finder unable periods classroom tasks democracy attacks wallpaper doors symptoms resorts biggest memorial visitor twin forth insert gateway alumni drawing charlotte ordered fighting happens romance split themes powers heaven bits pregnant twice focused physician bargain cellular asking blocks normally spiritual hunting diabetes suit shift chip bodies cutting writers marks flexible loved mapping numerous birds char indexed superior preferred saved paying cartoon shots granted choices carbon spending magnetic listening registry crisis outlook massive employed bright treat header poverty formed piano echo grid sheets patrick displays plasma allowing earnings voip mystery landscape dependent journey bidding risks banner applicant charter counties ports dreams blogger licensing stands teach occurred textbooks rapid pull hairy diversity reverse deposit seminar latina wheels specify dutch sensitive templates formats depends boots holds router concrete editing folder upload pulse technique voting courts notices calculate alexander broadcast converted metro strip pearl accident nick accessory resident plot possibly airline typically regard pump exists smooth strike flashing narrow afternoon threat surveys sitting putting ownership trailer castle gardens missed antique labels willing molecular acting heads stored exam logos residence attorneys antiques density hundred operators strange beds mention employers grey parallel honda amended operate bills bold bathroom stable opera doctors lesson cinema asset scan elections drinking reaction blank enhanced entitled severe generate stainless hospitals deluxe humor aged monitors exception lived duration bulk pursuant fabric visits primarily tight domains contrast flying berlin cute organized para siemens adoption improving expensive meant capture pounds buffalo plane explained seed desire expertise mechanism camping jewellery meets welfare peer caught marked driven measured bottle marshall massage rubber closing thousand meat legend grace python monster bang villa bone columns disorders bugs detection cookies inner formation tutorial engineers entity cruises gate holder proposals moderator tutorials roman duties valuable tone ethics forever dragon busy captain fantastic imagine brings heating neck wing scripts stereo appointed taste dealing commit tiny rail airlines liberal trips sides tube turns cache belt jacket animation oracle lease aviation hobbies proud excess disaster console commands giant achieved injuries shipped seats alarm voltage usual loading stamps appeared franklin angle vinyl mining designers ongoing worst imaging betting liberty blackjack convert analyst dangerous garage exciting desktops workshops quiet luck maker crack picks smoke cake notebooks citizen prize deck worker breaks sick existence syntax skill inquiry checked exhibit handbook judgment talks folk okay workplace expense packet extend adequate wiki lakes kings kent baker guestbook shock walker kiss pizza queries ranking jokes rack kerry knowing recognize plaza quest excel wake realize puzzle lucky thick expanded extras jerry broker rick trucks customize folks exposed spanking keeps johnny weak makers exceed silk examine jimmy kick unlike equation baskets quarterly enjoyed quebec sized socket seeker equipped acquired knight linking parker rocks axis judicial punk duke inkjet wizard picked killing bikini lookup texts brokers clerk jeans quiz tracked packs mask quantum requiring spoke oxygen cookie cricket stroke rankings hook skiing explains knife bookstore liked workforce realized excerpt drinks hazardous stack tracker trunk hiking juice extract judges remarks walked juvenile injection mistake locked sequences proxy killer bikes adjusted examined trek artwork joining equally jury drunk latex broke jews rocky frequent pixels exercises quit sucking spoken projector seeks hacker fake excluding thinks tricks monkey skirt junction weekends sixth quoted bronze adjacent exotic puzzles dozen benjamin likes zones luke ranked jackets packed excited talked chuck explicit ebook exclude brooks equations anxiety ebooks necklace qualify pickup brake exterior exchanges exports frozen josh expanding stuck homework adjust toxic darkness stockings joke packing rejected mixture executed asks relax pixel acquire equality stickers squad analyze execute packets socks clocks taxation jeep chicks tanks struck inquiries annex knee injured cookbook unlikely boxing bangkok duck nickname enquiries exploring trick enquiry intake mistakes geek sink brick hazard bizarre kissing exempt extends buzz nuke exhaust speaks fork organize mixing skilled projected chick walks keyboards knives backed horizon toolbox prizes bookmarks snake karaoke exhibits jail kidney fixes rocket racks queue skins exams quarters fixtures taxi zoning galaxy expo minimize ranks judy breakdown marker bookings jungle remix excluded excessive karma queens clicks hazards livestock exemption shake thickness extending jesse funk jaguar buck expires aqua enjoying sticker jill quizzes prefix texture locks hack hawk makeup textile indexes licking markers wicked kills junk organizer sake enzyme tackle disks kitty sticks excuse cheque reject checklist gazette jake textbook knights flux boutique alike blocked strikes exec bucks analyzed jenny nickel aquatic striking brook utilize unlock xerox quad dock blocking remark dozens picking pockets pork inquire fuji benchmark shark explosion ozone inbox flex lazy qualities boxed sexuality kinase skirts marking exclusion keen baking marijuana brakes sticky token zinc seekers skating kinda blacks burke kyle vertex expired undertake johns jewel funky joins likewise cakes mixer freeze cork maximize workout optimize locking blanket justify spank examining backing cooked textiles aquarium bracket oxide oaks sexually playback jade keno blink workflow fuzzy toolkit existed knock quilt kirk expects jumping bouquet jets spokesman frankfurt examines viking knit knitting attacked pike stake cocktail'.split(' ');
+let cfg=null,vocab=null,wlId=null,armed=false,done=false,stage=0,used=new Set(),stale=false,staleAt=0,eat=0,applying=false;
+/* ---- storage: extra 'meta' store inside the existing DB ---- */
+const mget=k=>new Promise(r=>{try{const q=db.transaction('meta').objectStore('meta').get(k);q.onsuccess=()=>r(q.result&&q.result.v);q.onerror=()=>r()}catch(e){r()}});
+const mset=(k,v)=>new Promise(r=>{try{const t=db.transaction('meta','readwrite');t.objectStore('meta').put({k,v});t.oncomplete=()=>r(1);t.onerror=t.onabort=()=>r(0)}catch(e){r(0)}});
+function shuffled(a){let s=20240611;const rnd=()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};
+  a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+/* ---- permanent Word List note (created once, reused if it already exists) ---- */
+async function init(){
+  cfg=(await mget('cfg'))||null;vocab=await mget('vocab');
+  if(!vocab||!vocab.length){vocab=shuffled(WORDS);await mset('vocab',vocab)}
+  wlId=await mget('wl');
+  let n=notes.find(x=>x.id===wlId)||notes.find(x=>x.title.trim().toLowerCase()==='word list');
+  if(!n&&db){n={id:uid(),title:'Word List',body:vocab.join('\n'),created:Date.now(),updated:Date.now()};notes.push(n);await persist({...n})}
+  if(n){wlId=n.id;await mset('wl',wlId)}
+}
+const isWL=()=>!!cur&&cur.id===wlId;
+const pool=()=>cur.body.split('\n');
+const okWord=(w,p,c)=>w.length>=p&&w[p-1].toUpperCase()===c;
+/* ---- validation: every needed character must have enough unique words ---- */
+function validate(name,pos,lines){
+  if(!/^[A-Za-z]+$/.test(name))return'Use letters A–Z only.';
+  if(!(pos>=1&&pos<=TUNE.maxPos&&Number.isInteger(pos)))return'Enter a whole number from 1 to '+TUNE.maxPos+'.';
+  const set=new Set(lines.map(l=>l.trim().toLowerCase()).filter(w=>/^[a-z]+$/.test(w)));
+  for(const c of new Set(name.toUpperCase())){let k=0;set.forEach(w=>okWord(w,pos,c)&&k++);
+    if(k<TUNE.minWords)return'Not enough suitable words for “'+c+'” at position '+pos+'. Try another value.'}
+  return'';
+}
+/* ---- popup (reuses the menu's look) ---- */
+function openPopup(){
+  if($('#mg'))return;
+  const o=document.createElement('div');o.id='mg';
+  o.innerHTML='<div class="mgc"><label>Name<input id="mgN" autocomplete="off" autocapitalize="off" spellcheck="false"></label><label>Position<input id="mgP" inputmode="numeric" pattern="[0-9]*"></label><div id="mgE"></div><div class="mgb"><button id="mgC">Cancel</button><button id="mgS">Save</button></div></div>';
+  document.body.appendChild(o);
+  const N=$('#mgN'),P=$('#mgP'),E=$('#mgE');N.value=cfg?cfg.name:'';P.value=cfg?cfg.pos:'';
+  const close=()=>o.remove();
+  $('#mgC').onclick=close;o.addEventListener('click',e=>{if(e.target===o)close()});
+  $('#mgS').onclick=async()=>{
+    const name=N.value.trim(),pos=+P.value.trim();
+    if(!name&&!P.value.trim()){cfg=null;await mset('cfg',null);return close()}   // empty = clear
+    const err=validate(name,pos,isWL()?pool():vocab);
+    if(err){E.textContent=err;return}                                            // old config untouched
+    cfg={name,pos};await mset('cfg',cfg);close();
+  };
+}
+/* ---- press-and-hold helper (Pointer Events; cancels on up/cancel/leave/move) ---- */
+function hold(el,ms,fn){
+  let t=0,x=0,y=0;const stop=()=>{clearTimeout(t);t=0};
+  el.addEventListener('contextmenu',e=>e.preventDefault());
+  el.addEventListener('pointerdown',e=>{stop();x=e.clientX;y=e.clientY;t=setTimeout(()=>{t=0;if(fn()){eat=1;setTimeout(()=>eat=0,900)}},ms)});
+  el.addEventListener('pointermove',e=>{if(t&&Math.hypot(e.clientX-x,e.clientY-y)>10)stop()});
+  ['pointerup','pointercancel','pointerleave'].forEach(n=>el.addEventListener(n,stop));
+}
+const buzz=()=>{try{navigator.vibrate&&navigator.vibrate(35)}catch(e){}};
+function arm(){
+  if(!isWL()||!cfg||validate(cfg.name,cfg.pos,pool()))return false;
+  const a=document.activeElement;if(a===body||a===title)return false;   // never interrupt active typing
+  restore();armed=true;done=false;stage=0;used=new Set();stale=false;endGesture();clearTimeout(g.t);buzz();blink();return true;
+}
+function blink(){ // restartable one-shot flicker of the three-dot icon; no layout or state change
+  const b=$('#edMore');b.classList.remove('mgblink');void b.offsetWidth;b.classList.add('mgblink');
+  setTimeout(()=>b.classList.remove('mgblink'),260);
+}
+function reset(){armed=false;done=false;stage=0;stale=false;used=new Set();clearTimeout(g.t);endGesture()}
+hold($('#edMore'),TUNE.holdCfg,()=>{if(cur&&C.isCeleb(cur.id)){C.popup();return true}openPopup();return true});   // Celebrities Name has its own Force Name popup; all other notes keep the original behaviour
+hold($('#newEd'),TUNE.holdNew,arm);
+/* ---- scroll detector: velocity over >=50ms windows; the moment a fast scroll is detected the WHOLE list is forced at once
+       (one gesture -> one stage; the forced view then stays put for any later slow scrolling); slow scrolls never qualify ---- */
+const g={lt:0,ls:0,peak:0,dist:0,touch:0,t:0,forced:false,ch:'',last:undefined};
+function restore(){ // put the persisted base order back into the view (same line count, so layout is unchanged)
+  if(!stale||!cur)return;const st=edScroll.scrollTop;applying=true;body.value=cur.body;edScroll.scrollTop=st;applying=false;stale=false}
+function endGesture(){g.lt=0;g.peak=0;g.dist=0;g.last=undefined;g.forced=false}   // next qualifying gesture may advance the stage again
+edScroll.addEventListener('scroll',()=>{
+  if(applying||!isWL()||(!armed&&!done))return;
+  const st=edScroll.scrollTop,now=performance.now();
+  if(!g.lt){g.lt=now;g.ls=st}
+  g.dist+=Math.abs(st-(g.last===undefined?st:g.last));g.last=st;
+  if(now-g.lt>=50){const v=Math.abs(st-g.ls)/(now-g.lt);g.peak=Math.max(g.peak,v);
+    if(!g.forced&&v<TUNE.fastV*0.25){g.dist=0;g.peak=0}                           // slow stretch: never accumulate towards a fast gesture
+    g.lt=now;g.ls=st}
+  if(!g.forced&&cfg&&stage<cfg.name.length&&g.peak>=TUNE.fastV&&g.dist>=edScroll.clientHeight*TUNE.minDistVH){
+    g.forced=true;g.ch=cfg.name[stage].toUpperCase();stage++;                         // one fast gesture = one stage
+    force();                                                                          // applied immediately, to the entire list
+  }
+  if(!g.forced&&done&&g.peak>=TUNE.fastV&&g.dist>=edScroll.clientHeight*TUNE.minDistVH){   // sequence already finished: next qualifying fast scroll restores the original list
+    g.forced=true;resetList();return;
+  }
+  clearTimeout(g.t);g.t=setTimeout(settle,TUNE.settleMs);
+},{passive:true});
+function resetList(){ // put the ENTIRE original list back (whole textarea, so above/inside/below the viewport) and start fresh
+  if(cur){const st=edScroll.scrollTop;applying=true;body.value=cur.body;edScroll.scrollTop=st;applying=false}
+  clearTimeout(g.t);armed=false;done=false;stage=0;used=new Set();stale=false;
+}
+edScroll.addEventListener('touchstart',()=>{g.touch=1;if(armed||done){clearTimeout(g.t);endGesture()}},{passive:true});   // a new finger-down always starts a fresh gesture
+['touchend','touchcancel'].forEach(n=>edScroll.addEventListener(n,()=>{g.touch=0;if((armed||done)&&g.dist){clearTimeout(g.t);g.t=setTimeout(settle,TUNE.settleMs)}},{passive:true}));
+function settle(){
+  if(g.touch){g.t=setTimeout(settle,TUNE.settleMs);return}        // finger still down: not finished
+  endGesture();                                                    // one gesture -> one decision
+  if(armed&&cfg&&stage>=cfg.name.length){armed=false;done=true}   // sequence complete: forced view stays until the next qualifying fast scroll resets it
+}
+/* ---- force engine: rewrite EVERY word line of the whole list (visible, above and below the viewport) with words from the
+       list's own vocabulary whose character at the chosen position is the active letter. View only, never persisted. ---- */
+function force(){
+  if(!cfg||!cur||!g.forced)return;
+  const ch=g.ch,p=cfg.pos,base=cur.body.split('\n'),st=edScroll.scrollTop;
+  const orig=new Map();
+  for(const l of base){const t=l.trim(),w=t.toLowerCase();if(/^[a-z]+$/.test(w)&&okWord(w,p,ch)&&!orig.has(w))orig.set(w,t)}
+  const all=[...orig.keys()];if(!all.length)return;
+  const shuf=a=>{a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
+  let order=shuf(all.filter(w=>!used.has(w))).concat(shuf(all.filter(w=>used.has(w)))),k=0,prev='';
+  const next=()=>{
+    if(k>=order.length){order=shuf(all);if(order.length>1&&order[0]===prev){const x=order.pop();order.unshift(x)}k=0}
+    const w=order[k++];prev=w;used.add(w);return orig.get(w)};
+  const out=base.map(l=>/^[A-Za-z]+$/.test(l.trim())?next():l);
+  const v=out.join('\n');
+  if(v!==body.value){applying=true;body.value=v;if(edScroll.scrollTop!==st)edScroll.scrollTop=st;applying=false}
+  g.last=edScroll.scrollTop;stale=true;staleAt=st;
+}
+/* if the user types in the Word List, the current view becomes their text (still a permutation) */
+const beforeEdit=()=>{stale=false};
+return{init,isWL:id=>id===wlId,eat:()=>{const v=eat;eat=0;return v},reset,beforeEdit};
+})();
+
+
+/* =====================================================================
+   CELEBRITIES NAME MODULE. Creates ONE "Celebrities Name" note (1..100) the first time only.
+   The stored note always keeps the default list; the forced name is applied to the *view* when the note
+   is opened (position from sessionStorage 'notes.forcePos', set by the lock screen; name from localStorage
+   'notes.forceName', set only by the Force Name popup). Fully independent of the Word List module.
+   ===================================================================== */
+const C=(()=>{
+const TITLE='Celebrities Name';
+const NAMES=["Shakib Khan", "Chanchal Chowdhury", "Jaya Ahsan", "Afran Nisho", "Siam Ahmed", "Mosharraf Karim", "Tahsan Khan", "Mehazabien Chowdhury", "Tasnia Farin", "Bidya Sinha Saha Mim", "Pori Moni", "Apu Biswas", "Purnima", "Shabnur", "Moushumi", "Razzak", "Riaz", "Ferdous Ahmed", "Arifin Shuvoo", "Ziaul Faruq Apurba", "Zahid Hasan", "Nusrat Imrose Tisha", "Nusrat Faria", "Azmeri Haque Badhon", "Sabnam Faria", "Safa Kabir", "Irfan Sajjad", "Sadia Jahan Prova", "Shirin Shila", "Humayun Ahmed", "Runa Laila", "Sabina Yasmin", "Andrew Kishore", "Ayub Bachchu", "Habib Wahid", "Kumar Bishwajit", "Arfin Rumey", "Kazi Shuvo", "Pritom Hasan", "Nancy", "James", "Konal", "Imran Mahmudul", "Minar Rahman", "Shafin Ahmed", "Abul Hayat", "Fazlur Rahman Babu", "Mahfuz Ahmed", "Intekhab Dinar", "Tauquir Ahmed", "Shah Rukh Khan", "Salman Khan", "Aamir Khan", "Amitabh Bachchan", "Deepika Padukone", "Alia Bhatt", "Hrithik Roshan", "Ranveer Singh", "Akshay Kumar", "Priyanka Chopra", "Katrina Kaif", "Aishwarya Rai", "Kareena Kapoor", "Anushka Sharma", "Ranbir Kapoor", "Varun Dhawan", "Madhuri Dixit", "Rajinikanth", "Kamal Haasan", "Prabhas", "Allu Arjun", "Mahesh Babu", "Dhanush", "Nayanthara", "Samantha Ruth Prabhu", "Rashmika Mandanna", "Anil Kapoor", "Ajay Devgn", "Irrfan Khan", "Nawazuddin Siddiqui", "Kajol", "Vidya Balan", "Mithun Chakraborty", "Prosenjit Chatterjee", "Dev", "Jeet", "Koel Mallick", "Rituparna Sengupta", "Arijit Singh", "Lata Mangeshkar", "Kishore Kumar", "Mohammed Rafi", "Asha Bhosle", "Shreya Ghoshal", "Sonu Nigam", "A. R. Rahman", "Kumar Sanu", "Sunidhi Chauhan", "Neha Kakkar", "Karan Johar"];
+let cid=null;
+const mget=k=>new Promise(r=>{try{const q=db.transaction('meta').objectStore('meta').get(k);q.onsuccess=()=>r(q.result&&q.result.v);q.onerror=()=>r()}catch(e){r()}});
+const mset=(k,v)=>new Promise(r=>{try{const t=db.transaction('meta','readwrite');t.objectStore('meta').put({k,v});t.oncomplete=()=>r(1);t.onerror=t.onabort=()=>r(0)}catch(e){r(0)}});
+async function init(){
+  if(!db)return;
+  cid=await mget('celeb');
+  let n=notes.find(x=>x.id===cid)||notes.find(x=>x.title.trim().toLowerCase()===TITLE.toLowerCase());
+  if(!n){n={id:uid(),title:TITLE,body:NAMES.map((s,i)=>(i+1)+'. '+s).join('\n'),created:Date.now(),updated:Date.now()};notes.push(n);await persist({...n})}
+  cid=n.id;await mset('celeb',cid);
+  if(await mget('celebList')!==2){   // one-time: swap the stored default list for the current NAMES (title, id, dates, force name and position are untouched)
+    const nb=NAMES.map((s,i)=>(i+1)+'. '+s).join('\n');
+    if(n.body!==nb){n.body=nb;await persist({...n})}
+    await mset('celebList',2);
+  }
+  await loadName();
+}
+const K_NAME='notes.forceName',K_POS='notes.forcePos',NUM=/^(\s*)(\d+)\.(\s|$)/;
+const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return null}};
+const ssGet=k=>{try{return sessionStorage.getItem(k)}catch(e){return null}};
+let fname='';   // in-memory copy of the saved force name (fallback if localStorage is unavailable)
+const getName=()=>(lsGet(K_NAME)||fname||'').trim();
+const getPos=()=>{const p=parseInt(ssGet(K_POS),10);return p>=1&&p<=99?p:0};
+/* the saved name is kept in localStorage (primary) and mirrored in IndexedDB; neither is ever cleared automatically */
+async function loadName(){
+  fname=(lsGet(K_NAME)||'').trim();
+  if(!fname){const m=await mget('forceName');if(typeof m==='string'&&m.trim()){fname=m.trim();try{localStorage.setItem(K_NAME,fname)}catch(e){}}}
+}
+async function saveName(v){
+  fname=v;let ok=false;
+  try{localStorage.setItem(K_NAME,v);ok=true}catch(e){}
+  if(await mset('forceName',v))ok=true;
+  return ok;
+}
+/* text to show in the editor for note n (n.body itself is never changed here) */
+function view(n){
+  if(!n||n.id!==cid)return n.body;
+  const name=getName(),pos=getPos();
+  if(!name||!pos)return n.body;
+  return n.body.split('\n').map(l=>{const m=l.match(NUM);return m&&+m[2]===pos?m[1]+pos+'. '+name:l}).join('\n');
+}
+/* text -> what gets stored: if the forced line is still untouched in the editor, put the default entry back,
+   so the stored 100-entry list is never overwritten by the forced name */
+function store(n,text){
+  if(!n||n.id!==cid)return text;
+  const name=getName(),pos=getPos();if(!name||!pos)return text;
+  const orig=n.body.split('\n').find(l=>{const m=l.match(NUM);return m&&+m[2]===pos});
+  if(orig===undefined)return text;
+  const lines=text.split('\n');
+  for(let i=0;i<lines.length;i++){const m=lines[i].match(NUM);
+    if(m&&+m[2]===pos&&lines[i].slice(m[1].length)===pos+'. '+name){lines[i]=orig;break}}
+  return lines.join('\n');
+}
+/* ---- Force Name popup: only reachable from a long-press on the three-dot icon inside Celebrities Name ---- */
+function closePopup(){const o=document.getElementById('cfm');if(o)o.remove()}
+function popup(){
+  if(document.getElementById('cfm'))return;
+  const o=document.createElement('div');o.id='cfm';
+  o.innerHTML='<div class="mgc" role="dialog" aria-modal="true" aria-label="Force Name"><div class="cfm-t">Force Name</div><input id="cfmN" type="text" autocomplete="off" autocapitalize="words" spellcheck="false" placeholder="Enter a name" aria-label="Force name"><div id="cfmE"></div><div class="mgb"><button id="cfmC" type="button">Cancel</button><button id="cfmS" type="button">Save</button></div></div>';
+  document.body.appendChild(o);
+  const N=document.getElementById('cfmN'),E=document.getElementById('cfmE'),t0=Date.now();
+  N.value=getName();
+  const save=async()=>{
+    const v=N.value.trim();
+    if(!v){E.textContent='Enter a name.';return}
+    if(await saveName(v)){closePopup();toast('Force name saved')}
+    else E.textContent='Could not save.';
+  };
+  document.getElementById('cfmC').onclick=closePopup;
+  document.getElementById('cfmS').onclick=save;
+  // ignore the tail of the long-press itself (release) so the popup cannot dismiss as it opens
+  o.addEventListener('click',e=>{if(e.target===o&&Date.now()-t0>900)closePopup()});
+  N.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();save()}else if(e.key==='Escape'){e.preventDefault();closePopup()}});
+  setTimeout(()=>{try{N.focus();N.select()}catch(e){}},0);
+}
+return{init,view,store,popup,closePopup,isCeleb:id=>!!cid&&id===cid};
+})();
+
+/* ---------- Init ---------- */
+(async()=>{
+  try{db=await openDB();notes=(await tx('readonly',s=>s.getAll()))||[]}
+  catch(e){toast('⚠︎ Storage unavailable — notes will NOT be saved.',5000)}
+  try{await M.init()}catch(e){}
+  try{await C.init()}catch(e){}
+  history.replaceState({h:1},'');render();
+})();
+})();
+</script>
+</body>
+</html>
